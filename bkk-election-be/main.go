@@ -5,21 +5,20 @@ import (
 	"log"
 	"os"
 
-	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
-	// 🚨 เปลี่ยนตรงนี้ให้ตรงกับชื่อในบรรทัดแรกของไฟล์ bkk-election-be/go.mod ของคุณ
+	"github.com/sontayajah/bkk-election/bkk-election-be/internal/api/router"
 	"github.com/sontayajah/bkk-election/bkk-election-be/internal/db"
+	"github.com/sontayajah/bkk-election/bkk-election-be/internal/queue"
 )
 
 func main() {
-	// 1. โหลดตัวแปรสภาพแวดล้อม (Environment Variables) จากไฟล์ .env
 	if err := godotenv.Load(); err != nil {
 		log.Println("⚠️ No .env file found. Falling back to system environment variables.")
 	}
 
-	// 2. สร้าง Database Connection Pool (เตรียมรับมือ High Concurrency)
+	// --- 1. Database Setup ---
 	dbUrl := os.Getenv("BACKEND_DATABASE_URL")
 	if dbUrl == "" {
 		log.Fatal("❌ BACKEND_DATABASE_URL is not set")
@@ -38,31 +37,32 @@ func main() {
 	}
 	log.Println("✅ Successfully connected to PostgreSQL (Connection Pool Ready)!")
 
-	// 3. ผูก Connection Pool เข้ากับคำสั่ง SQL ที่ sqlc สร้างให้เรา
 	queries := db.New(pool)
-	_ = queries // เดี๋ยวเราจะเอาตัวแปรนี้ไปส่งต่อให้ API และ Worker ใช้
+	_ = queries // เราจะส่ง queries ไปให้ Worker ใช้ในอนาคต
 
-	// 4. ตั้งค่า Gin Web Framework
-	// ถ้าเป็น Production เราจะเซ็ต gin.SetMode(gin.ReleaseMode)
-	router := gin.Default()
+	// --- 2. Kafka Setup ---
+	// ชี้ไปที่ Kafka Broker ใน Docker Compose ของเรา (พอร์ต 9092)
+	kafkaBroker := os.Getenv("BACKEND_KAFKA_BROKER")
+	if kafkaBroker == "" {
+		kafkaBroker = "localhost:9092"
+	}
+	kafkaTopic := "station-results" // ชื่อ Topic ที่เราจะโยนของลงไป
 
-	// 5. สร้าง Route เริ่มต้น (Health Check)
-	router.GET("/api/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"status": "UP",
-			"database": "CONNECTED",
-			"message": "BKK Election API is running 🚀",
-		})
-	})
+	producer := queue.NewKafkaProducer(kafkaBroker, kafkaTopic)
+	defer producer.Close()
+	log.Println("✅ Connected to Kafka Producer!")
 
-	// 6. เริ่มเปิดเซิร์ฟเวอร์
+	// --- 3. API Router Setup ---
+	r := router.SetupRoutes(producer)
+
+	// --- 4. Start Server ---
 	port := os.Getenv("BACKEND_PORT")
 	if port == "" {
-		port = "8080"
+		port = "8081"
 	}
 	
 	log.Printf("🔥 Starting server on port %s...", port)
-	if err := router.Run(":" + port); err != nil {
+	if err := r.Run(":" + port); err != nil {
 		log.Fatalf("❌ Failed to start server: %v", err)
 	}
 }
