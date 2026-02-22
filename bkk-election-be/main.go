@@ -8,9 +8,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
-	"github.com/sontayajah/bkk-election/bkk-election-be/internal/api/router"
-	"github.com/sontayajah/bkk-election/bkk-election-be/internal/db"
-	"github.com/sontayajah/bkk-election/bkk-election-be/internal/queue"
+	"github.com/sontayajah/bkk-election/bkk-election-be/internal/router"
+	"github.com/sontayajah/bkk-election/bkk-election-be/internal/infra/db"
+	"github.com/sontayajah/bkk-election/bkk-election-be/internal/infra/queue"
 )
 
 func main() {
