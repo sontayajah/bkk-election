@@ -9,52 +9,34 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-// StationResultPayload คือโครงสร้างข้อมูล (JSON) ที่เรารับมาจากหน้าเว็บ
-// (ต้องตรงกับที่เราออกแบบไว้ใน PRD)
-type StationResultPayload struct {
-	IdempotencyKey string `json:"idempotency_key"` // 🚨 เราจะสร้างคีย์นี้ใน API ก่อนโยนลง Kafka
-	DistrictID     int    `json:"district_id"`
-	StationID      int    `json:"polling_station_id"`
-	VotersCount    int    `json:"voters_count"`
-	ValidBallots   int    `json:"valid_ballots"`
-	InvalidBallots int    `json:"invalid_ballots"`
-	NoVotes        int    `json:"no_votes"`
-	CandidateVotes []CandidateVote `json:"candidate_votes"`
-}
-
-type CandidateVote struct {
-	CandidateID int `json:"candidate_id"`
-	Votes       int `json:"votes"`
-}
-
 // KafkaProducer เป็น Struct สำหรับจัดการการเชื่อมต่อ
 type KafkaProducer struct {
 	writer *kafka.Writer
 }
 
-// NewKafkaProducer สร้างการเชื่อมต่อไปยัง Kafka (เรียกใช้ตอนเปิดเซิร์ฟเวอร์)
-func NewKafkaProducer(brokerAddress string, topic string) *KafkaProducer {
+// NewKafkaProducer ตอนนี้รับแค่ Broker Address ไม่ผูกมัดกับ Topic แล้ว!
+func NewKafkaProducer(brokerAddress string) *KafkaProducer {
 	w := &kafka.Writer{
 		Addr:     kafka.TCP(brokerAddress),
-		Topic:    topic,
-		Balancer: &kafka.LeastBytes{}, // กระจายโหลดให้เท่าๆ กัน
-		// สำคัญมากสำหรับ High Concurrency: ไม่ต้องรอให้เขียนครบทุก Broker (Async)
-		Async:    true, 
+		// 🚨 ลบบรรทัด Topic: topic ออกไปเลย
+		Balancer: &kafka.LeastBytes{},
+		Async:    true,
 	}
 	return &KafkaProducer{writer: w}
 }
 
-// PublishStationResult เป็นฟังก์ชันสำหรับโยน Payload ลง Kafka
-func (p *KafkaProducer) PublishStationResult(ctx context.Context, payload StationResultPayload) error {
-	// 1. แปลง Go Struct (Payload) ให้กลายเป็นก้อน JSON (Bytes)
+// PublishJSON 🌟 ฟังก์ชันกลางสุดเทพ ที่โดเมนไหนก็เรียกใช้ได้ แค่บอกชื่อ Topic
+func (p *KafkaProducer) PublishJSON(ctx context.Context, topic string, key string, payload interface{}) error {
+	// 1. แปลง Struct อะไรก็ได้ (interface{}) ให้เป็น JSON
 	bytes, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 
-	// 2. สร้างข้อความที่จะส่ง (กำหนด Key เป็นรหัสเขต เพื่อให้คะแนนเขตเดียวกันวิ่งไปเรียงคิวที่ Partition เดียวกัน)
+	// 2. สร้างข้อความ พร้อมระบุ Topic เป้าหมาย
 	msg := kafka.Message{
-		Key:   []byte(payload.IdempotencyKey), // ใช้คีย์กันซ้ำเป็น Key ของ Message
+		Topic: topic,       // 🎯 กำหนด Topic ตรงนี้แทน!
+		Key:   []byte(key), // ใช้ Key เพื่อรับประกันลำดับข้อมูล (Ordering)
 		Value: bytes,
 		Time:  time.Now(),
 	}
@@ -62,14 +44,31 @@ func (p *KafkaProducer) PublishStationResult(ctx context.Context, payload Statio
 	// 3. ยิงเข้า Kafka
 	err = p.writer.WriteMessages(ctx, msg)
 	if err != nil {
-		log.Printf("❌ Failed to write messages to Kafka: %v", err)
+		log.Printf("❌ Failed to write messages to Kafka topic '%s': %v", topic, err)
 		return err
 	}
 
 	return nil
 }
 
-// Close ปิดการเชื่อมต่อเมื่อเลิกใช้งาน
+// Close ปิดการเชื่อมต่อ
 func (p *KafkaProducer) Close() error {
 	return p.writer.Close()
+}
+
+// โครงสร้างข้อมูลที่ใช้ร่วมกัน
+type StationResultPayload struct {
+	IdempotencyKey string          `json:"idempotency_key"`
+	DistrictID     int             `json:"district_id"`
+	StationID      int             `json:"polling_station_id"`
+	VotersCount    int             `json:"voters_count"`
+	ValidBallots   int             `json:"valid_ballots"`
+	InvalidBallots int             `json:"invalid_ballots"`
+	NoVotes        int             `json:"no_votes"`
+	CandidateVotes []CandidateVote `json:"candidate_votes"`
+}
+
+type CandidateVote struct {
+	CandidateID int `json:"candidate_id"`
+	Votes       int `json:"votes"`
 }

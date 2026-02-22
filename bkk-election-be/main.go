@@ -46,9 +46,8 @@ func main() {
 	if kafkaBroker == "" {
 		kafkaBroker = "localhost:9092"
 	}
-	kafkaTopic := "station-results" // ชื่อ Topic ที่เราจะโยนของลงไป
 
-	producer := queue.NewKafkaProducer(kafkaBroker, kafkaTopic)
+	producer := queue.NewKafkaProducer(kafkaBroker)
 	defer producer.Close()
 	log.Println("✅ Connected to Kafka Producer!")
 
